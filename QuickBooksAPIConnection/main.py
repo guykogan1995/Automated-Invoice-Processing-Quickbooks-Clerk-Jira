@@ -6,7 +6,7 @@ import base64
 import requests
 
 global transactions
-payed_transactions = []
+payed_transactions = {}
 
 
 def refresh_access_token(refresh_token, client_id, client_secret):
@@ -33,6 +33,12 @@ def get_transactions():
     response2 = requests.get(url, headers=headers)
     invoices2 = response2.json()
     transactions = invoices2['QueryResponse']['Invoice']
+    for transaction in transactions:
+        if transaction['Balance'] == 0.0:
+            invoice_dictionary = {"ID": transaction["Id"], "Total Amount": transaction["TotalAmt"],
+                                  "Customer Name": transaction["CustomerRef"]["name"],
+                                  "Bill Email": transaction["BillEmail"]["Address"]}
+            payed_transactions[transaction["Id"]] = invoice_dictionary
 
 
 CLIENT_ID = 'ABRfb8HlI2YzXziLnnXqooLXiqI24kKyGPZIgy3X9kkeZ289Tq'
@@ -49,7 +55,7 @@ auth_client = AuthClient(
 url = auth_client.get_authorization_url([Scopes['ACCOUNTING']])
 print(url)
 
-auth_code = 'AB11704872589jng2pa74DZmEAfGPTzKqQ5tha7u7IMZkK0Lnv'
+auth_code = 'AB11704932370nmdEo9bhvAeYspKyppvJSZe70CZigamO0BObq'
 realm_id = '4620816365380591410'
 auth_client.get_bearer_token(auth_code, realm_id=realm_id)
 
@@ -65,16 +71,11 @@ if response.status_code == 200:
     schedule.every(30).minutes.do(refresh_access_token, auth_client.refresh_token, CLIENT_ID, CLIENT_SECRET)
     schedule.every(30).minutes.do(get_transactions)
     get_transactions()
-    for transaction in transactions:
-        if transaction['Balance'] == 0.0:
-            invoice_dictionary = {"ID": transaction["Id"], "Total Amount": transaction["TotalAmt"],
-                                  "Customer Name": transaction["CustomerRef"]["name"],
-                                  "Bill Email": transaction["BillEmail"]["Address"]}
-            payed_transactions.append(invoice_dictionary)
-    print(payed_transactions)
-    print(len(payed_transactions))
     while True:
         schedule.run_pending()
+        print(payed_transactions)
+        print(len(payed_transactions))
         time.sleep(60 * 10)
+
 else:
     print(f"Failed to fetch invoices: {response.text}")

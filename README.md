@@ -24,7 +24,10 @@ This Python script automates the workflow for processing invoices by seamlessly 
    - Clerk credentials include `AUTHOR-KEY`.
    - Jira credentials include `CREDENTIALS`.
 
-2. **Run the Script:**
+2. **Ensure the Redirect Link is Correct in QuickbooksAPIConnection.connect.py:**
+   - Ensure the Redirect link is the same as the redirect link in Intuit.
+
+3. **Run the Script:**
    - Navigate to the project directory.
    - Execute the `main.py` script using a Python interpreter.
 
@@ -33,7 +36,8 @@ python main.py
 ```
 
 3. **Monitoring:**
-   - The script continuously monitors for paid transactions in QuickBooks.
+   - The script continuously monitors for paid transactions in QuickBooks every 55 minutes.
+   - The script will refresh the tokens to not expire every 55 minutes.
    - If a paid transaction is found, it updates the status in Clerk and Jira.
 
 4. **Refresh Tokens:**

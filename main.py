@@ -33,7 +33,7 @@ if __name__ == '__main__':
                     QuickBooks ID: {qb_connect.payed_transactions[transaction]["QuickBooks Ref"]}""")
                     print("------> To Completed")
                 print("-------------------------------------------------")
-        time.sleep(60 * 50)
+        time.sleep(60 * 55)
         new_access_token, new_refresh_token = qb_connect.refresh_access_token(qb_connect.REFRESH_TOKEN,
                                                                               qb_connect.CLIENT_ID,
                                                                               qb_connect.CLIENT_SECRET)

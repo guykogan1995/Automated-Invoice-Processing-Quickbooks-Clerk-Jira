@@ -5,16 +5,16 @@ Date: 1/15/2024
 Description: This Python script connects to the QuickBooks API and pulls
     in orders that have been paid to be processed into Jira and Clerk.
 """
+
 from intuitlib.client import AuthClient
 from intuitlib.enums import Scopes
 import base64
 import requests
 
 # Constants which will be used to authenticate within Quickbooks
-CLIENT_ID = ''
-CLIENT_SECRET = ''
 REDIRECT_URI = 'https://developer.intuit.com/v2/OAuth2Playground/RedirectUrl'
 SANDBOX_ENVIRONMENT = 'sandbox'
+creds = {}
 
 
 class Connection:
@@ -22,7 +22,7 @@ class Connection:
     This is the Connection class of QuickBooks
     """
 
-    def __init__(self, auth=""):
+    def __init__(self, auth="", refresh=""):
         """
         This is the constructor for the Connection class and runs the connection as well
         as initializes the dictionary payed_transactions
@@ -31,7 +31,28 @@ class Connection:
             after user has authenticated via URL, the user will need to put into the constructor.
         """
         self.payed_transactions = {}
-        self.run_connection(auth)
+        self.memo = {}
+
+        with open("Credentials.txt", "r") as f:
+            lines = f.readlines()
+        for line in lines:
+            if "Clerk:" in line:
+                break
+            if "QuickBooks:" in line:
+                continue
+            else:
+                key, value = line.split()
+                creds[key] = value
+        self.CLIENT_ID = creds['CLIENT_ID']
+        self.CLIENT_SECRET = creds["CLIENT_SECRET"]
+        self.auth_client = AuthClient(
+            client_id=self.CLIENT_ID,
+            client_secret=self.CLIENT_SECRET,
+            redirect_uri=REDIRECT_URI,
+            environment=SANDBOX_ENVIRONMENT,
+        )
+        self.REFRESH_TOKEN = ''
+        self.run_connection(auth, refresh)
 
     def refresh_access_token(self, refresh_token, client_id, client_secret):
         """This function takes 3 strings: refresh token, client id, and client secret
@@ -47,21 +68,25 @@ class Connection:
         """
 
         token_endpoint = 'https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer'
-        auth_header2 = base64.b64encode(f'{client_id}:{client_secret}'.encode()).decode()
-        headers2 = {
-            'Authorization': f'Basic {auth_header2}',
+        auth_header = base64.b64encode(f'{client_id}:{client_secret}'.encode()).decode()
+
+        headers = {
+            'Authorization': f'Basic {auth_header}',
             'Content-Type': 'application/x-www-form-urlencoded'
         }
+
         data = {
             'grant_type': 'refresh_token',
             'refresh_token': refresh_token
         }
-        response2 = requests.post(token_endpoint, headers=headers2, data=data)
-        if response2.status_code == 200:
-            new_tokens = response2.json()
+
+        response = requests.post(token_endpoint, headers=headers, data=data)
+
+        if response.status_code == 200:
+            new_tokens = response.json()
             return new_tokens['access_token'], new_tokens['refresh_token']
         else:
-            raise Exception(f"Failed to refresh token: {response2.text}")
+            raise Exception(f"Failed to refresh token: {response.text}")
 
     def get_transactions(self, url, headers):
         """This function takes 2 strings: url, and headers
@@ -81,19 +106,25 @@ class Connection:
         for transaction in transactions:
             if transaction['Balance'] == 0.0:
                 private_note = str(transaction.get("PrivateNote"))
+                if "\nJira Invoiced Status: True" in private_note:
+                    continue
                 start = private_note.rfind("Clerk Invoice Number: ")
-                end = private_note.find(" Clerk Invoice Link:")
+                end = private_note.find("\n")
                 unique_id = private_note[start + len("Clerk Invoice Number: "): end]
                 start = private_note.rfind("/")
                 clark_id = private_note[start + 1:]
+                quickbooks_id = transaction.get("Id")
+                self.memo[quickbooks_id] = {"note": private_note,
+                                            "sync": transaction["SyncToken"]
+                                            }
                 amount = transaction.get("TotalAmt")
                 name = transaction["CustomerRef"].get("name")
-                # email = transaction.get("BillEmail")
                 invoice_dictionary = {"ID": unique_id, "Total Amount": amount,
-                                      "Customer Name": name, "Clerk Reference": clark_id}
+                                      "Customer Name": name, "Clerk Reference": clark_id,
+                                      "QuickBooks Ref": quickbooks_id}
                 self.payed_transactions[unique_id] = invoice_dictionary
 
-    def run_connection(self, auth_code=""):
+    def run_connection(self, auth_2="", refresh=""):
         """This function takes 1 optional strings: auth_code
         It will create the connection to quickbooks by first making the user sign in,
         and then supplying an authorization code
@@ -105,19 +136,27 @@ class Connection:
 
         prints: status code and if connection was successful
         """
-        auth_client = AuthClient(
-            client_id=CLIENT_ID,
-            client_secret=CLIENT_SECRET,
-            redirect_uri=REDIRECT_URI,
-            environment=SANDBOX_ENVIRONMENT,
-        )
-        url = auth_client.get_authorization_url([Scopes['ACCOUNTING']])
+        url = self.auth_client.get_authorization_url([Scopes['ACCOUNTING']])
         print(url)
-        realm_id = '4620816365380591410'
-        auth_client.get_bearer_token(auth_code, realm_id=realm_id)
-        base_url = 'https://sandbox-quickbooks.api.intuit.com'
-        url = '{0}/v3/company/{1}/query?query=select * from Invoice'.format(base_url, auth_client.realm_id)
-        auth_header = 'Bearer {0}'.format(auth_client.access_token)
+        if creds["REALM_ID"] == "<Fill-this-out-after-first-run>":
+            realm_id = ""
+        else:
+            realm_id = creds["REALM_ID"]
+        if creds["AUTHORIZATION"] == "<Fill-this-out-after-first-run>":
+            print("Need to click on link")
+            exit(1)
+        else:
+            auth_code = creds["AUTHORIZATION"]
+            if auth_2 == "":
+                self.auth_client.get_bearer_token(auth_code, realm_id=realm_id)
+        if auth_2 != "":
+            auth_code = auth_2
+            self.auth_client.access_token = auth_code
+            self.auth_client.refresh_token = refresh
+        self.REFRESH_TOKEN = self.auth_client.refresh_token
+        base_url = 'https://quickbooks.api.intuit.com'
+        url = '{0}/v3/company/{1}/query?query=select * from Invoice'.format(base_url, self.auth_client.realm_id)
+        auth_header = 'Bearer {0}'.format(self.auth_client.access_token)
         headers = {
             'Authorization': auth_header,
             'Accept': 'application/json'
@@ -125,6 +164,27 @@ class Connection:
         response = requests.get(url, headers=headers)
         if response.status_code == 200:
             self.get_transactions(url, headers)
+            print(self.get_transactions)
+            if len(self.payed_transactions) == 0:
+                print("No completed transactions")
             print(f"successfully fetched invoices from QuickBooks: response 200")
         else:
             print(f"Failed to fetch invoices: {response.text}")
+
+    def update_invoice(self, quick_id):
+        base_url = 'https://quickbooks.api.intuit.com'
+        url = '{0}/v3/company/{1}/invoice?operation=update'.format(base_url, self.auth_client.realm_id)
+        auth_header = 'Bearer {0}'.format(self.auth_client.access_token)
+        headers = {
+            'Authorization': auth_header,
+            'Accept': 'application/json',
+            'Content-Type': 'application/json'
+        }
+        data = {
+            "SyncToken": str(int(self.memo[quick_id]["sync"]) + 1),
+            "Id": quick_id,
+            "sparse": True,
+            "PrivateNote": self.memo[quick_id]["note"] + "\nJira Invoiced Status: True"
+        }
+        response3 = requests.post(url, headers=headers, json=data)
+        return response3.status_code

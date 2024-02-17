@@ -52,7 +52,7 @@ class Connection:
             environment=SANDBOX_ENVIRONMENT,
         )
         self.REFRESH_TOKEN = ''
-        self.run_connection(auth, refresh)
+        self.status = self.run_connection(auth, refresh)
 
     def refresh_access_token(self, refresh_token, client_id, client_secret):
         """This function takes 3 strings: refresh token, client id, and client secret
@@ -164,12 +164,13 @@ class Connection:
         response = requests.get(url, headers=headers)
         if response.status_code == 200:
             self.get_transactions(url, headers)
-            print(self.get_transactions)
+            # print(self.get_transactions)
             if len(self.payed_transactions) == 0:
                 print("No completed transactions")
             print(f"successfully fetched invoices from QuickBooks: response 200")
         else:
             print(f"Failed to fetch invoices: {response.text}")
+        return response.status_code
 
     def update_invoice(self, quick_id):
         base_url = 'https://quickbooks.api.intuit.com'

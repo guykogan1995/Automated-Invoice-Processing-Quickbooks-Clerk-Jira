@@ -39,7 +39,6 @@ if __name__ == '__main__':
             clerk_ref = qb_connect.payed_transactions[transaction]["Clerk Reference"]
             logger.info('Searching Clerk with reference: ' + clerk_ref)
             status = ClerkAPIConnection.connect.search_id(clerk_ref)
-            # keys_to_exclude = {"export", "exportToConnectedAccounts", "publicLink", "ID", "invoiceTemplate"}
             if int(status) in [0, 1, 3]:
                 logger.info('Clerk status is not done -> moving to done: ' + clerk_ref)
                 clerk_success = ClerkAPIConnection.connect.update_status(clerk_ref, "2", {'status': 2})

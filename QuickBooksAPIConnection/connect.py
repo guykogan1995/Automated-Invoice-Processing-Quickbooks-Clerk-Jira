@@ -11,6 +11,7 @@ from intuitlib.enums import Scopes
 import base64
 import requests
 
+
 # Constants which will be used to authenticate within Quickbooks
 REDIRECT_URI = 'https://developer.intuit.com/v2/OAuth2Playground/RedirectUrl'
 SANDBOX_ENVIRONMENT = 'sandbox'
@@ -101,28 +102,29 @@ class Connection:
         """
         response2 = requests.get(url, headers=headers)
         invoices2 = response2.json()
-
-        transactions = invoices2['QueryResponse']['Invoice']
+        if len(invoices2['QueryResponse']) == 0:
+            transactions = []
+        else:
+            transactions = invoices2['QueryResponse']['Invoice']
         for transaction in transactions:
-            if transaction['Balance'] == 0.0:
-                private_note = str(transaction.get("PrivateNote"))
-                if "\nJira Invoiced Status: True" in private_note:
-                    continue
-                start = private_note.rfind("Clerk Invoice Number: ")
-                end = private_note.find("\n")
-                unique_id = private_note[start + len("Clerk Invoice Number: "): end]
-                start = private_note.rfind("/")
-                clark_id = private_note[start + 1:]
-                quickbooks_id = transaction.get("Id")
-                self.memo[quickbooks_id] = {"note": private_note,
-                                            "sync": transaction["SyncToken"]
-                                            }
-                amount = transaction.get("TotalAmt")
-                name = transaction["CustomerRef"].get("name")
-                invoice_dictionary = {"ID": unique_id, "Total Amount": amount,
-                                      "Customer Name": name, "Clerk Reference": clark_id,
-                                      "QuickBooks Ref": quickbooks_id}
-                self.payed_transactions[unique_id] = invoice_dictionary
+            private_note = str(transaction.get("PrivateNote"))
+            if "\nJira Invoiced Status: True" in private_note:
+                continue
+            start = private_note.rfind("Clerk Invoice Number: ")
+            end = private_note.find("\n")
+            unique_id = private_note[start + len("Clerk Invoice Number: "): end]
+            start = private_note.rfind("/")
+            clark_id = private_note[start + 1:]
+            quickbooks_id = transaction.get("Id")
+            self.memo[quickbooks_id] = {"note": private_note,
+                                        "sync": transaction["SyncToken"]
+                                        }
+            amount = transaction.get("TotalAmt")
+            name = transaction["CustomerRef"].get("name")
+            invoice_dictionary = {"ID": unique_id, "Total Amount": amount,
+                                  "Customer Name": name, "Clerk Reference": clark_id,
+                                  "QuickBooks Ref": quickbooks_id}
+            self.payed_transactions[unique_id] = invoice_dictionary
 
     def run_connection(self, auth_2="", refresh=""):
         """This function takes 1 optional strings: auth_code
@@ -163,8 +165,9 @@ class Connection:
         }
         response = requests.get(url, headers=headers)
         if response.status_code == 200:
-            self.get_transactions(url, headers)
-            # print(self.get_transactions)
+            query = "SELECT * FROM Invoice WHERE Balance = '0'"
+            url2 = "{0}/v3/company/{1}/query?query={2}".format(base_url, self.auth_client.realm_id, query)
+            self.get_transactions(url2, headers)
             if len(self.payed_transactions) == 0:
                 print("No completed transactions")
             print(f"successfully fetched invoices from QuickBooks: response 200")

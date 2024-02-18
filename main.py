@@ -27,7 +27,7 @@ if __name__ == '__main__':
     log_format = '%(asctime)s [%(process)d]: %(message)s'
     handler.setFormatter(logging.Formatter(log_format, datefmt="%d-%m-%Y %H:%M:%S"))
     logger.addHandler(handler)
-    logger.setLevel(1)
+    logger.setLevel(logging.INFO)
     logger.info('Connecting to QuickBooks...')
     qb_connect = QuickBooksAPIConnection.connect.Connection()
     if qb_connect.status != 200:
@@ -78,7 +78,6 @@ if __name__ == '__main__':
             logger.info(str_reports_arr)
         else:
             logger.info("No tickets were changed")
-
         time.sleep(60 * 55)
         new_access_token, new_refresh_token = qb_connect.refresh_access_token(qb_connect.REFRESH_TOKEN,
                                                                               qb_connect.CLIENT_ID,

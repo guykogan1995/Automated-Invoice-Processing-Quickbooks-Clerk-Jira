@@ -10,6 +10,7 @@ from intuitlib.client import AuthClient
 from intuitlib.enums import Scopes
 import base64
 import requests
+import sqlite3
 
 
 # Constants which will be used to authenticate within Quickbooks
@@ -33,19 +34,25 @@ class Connection:
         """
         self.payed_transactions = {}
         self.memo = {}
-
         with open("Credentials.txt", "r") as f:
             lines = f.readlines()
         for line in lines:
-            if "Clerk:" in line:
-                break
             if "QuickBooks:" in line:
                 continue
             else:
                 key, value = line.split()
                 creds[key] = value
-        self.CLIENT_ID = creds['CLIENT_ID']
-        self.CLIENT_SECRET = creds["CLIENT_SECRET"]
+        con = sqlite3.connect("Jira-Quickbooks-sql.db")
+        cur = con.cursor()
+        res = cur.execute("SELECT identifier, value FROM Credentials WHERE identifier = 'client_id';")
+        self.CLIENT_ID = res.fetchone()[1]
+        res = cur.execute("SELECT identifier, value FROM Credentials WHERE identifier = 'client_secret';")
+        self.CLIENT_SECRET = res.fetchone()[1]
+        res = cur.execute("SELECT identifier, value FROM Credentials WHERE identifier = 'realm_id';")
+        self.REALM_ID = res.fetchone()[1]
+        res = cur.execute("SELECT identifier, value FROM Credentials WHERE identifier = 'realm_id';")
+        self.AUTHORIZATION = res.fetchone()[1]
+        con.close()
         self.auth_client = AuthClient(
             client_id=self.CLIENT_ID,
             client_secret=self.CLIENT_SECRET,
@@ -102,19 +109,24 @@ class Connection:
         """
         response2 = requests.get(url, headers=headers)
         invoices2 = response2.json()
+        con = sqlite3.connect("Jira-Quickbooks-sql.db")
+        cur = con.cursor()
         if len(invoices2['QueryResponse']) == 0:
             transactions = []
         else:
             transactions = invoices2['QueryResponse']['Invoice']
         for transaction in transactions:
             private_note = str(transaction.get("PrivateNote"))
-            if "\nJira Invoiced Status: True" in private_note:
-                continue
             start = private_note.rfind("Clerk Invoice Number: ")
             end = private_note.find("\n")
             unique_id = private_note[start + len("Clerk Invoice Number: "): end]
-            start = private_note.rfind("/")
-            clark_id = private_note[start + 1:]
+            res = cur.execute(f"SELECT is_invoiced  FROM Invoices WHERE jira_id = '{unique_id}';")
+            try:
+                is_done = res.fetchone()[0]
+            except TypeError:
+                continue
+            if is_done == '1':
+                continue
             quickbooks_id = transaction.get("Id")
             self.memo[quickbooks_id] = {"note": private_note,
                                         "sync": transaction["SyncToken"]
@@ -122,9 +134,10 @@ class Connection:
             amount = transaction.get("TotalAmt")
             name = transaction["CustomerRef"].get("name")
             invoice_dictionary = {"ID": unique_id, "Total Amount": amount,
-                                  "Customer Name": name, "Clerk Reference": clark_id,
+                                  "Customer Name": name,
                                   "QuickBooks Ref": quickbooks_id}
             self.payed_transactions[unique_id] = invoice_dictionary
+        con.close()
 
     def run_connection(self, auth_2="", refresh=""):
         """This function takes 1 optional strings: auth_code
@@ -140,17 +153,14 @@ class Connection:
         """
         url = self.auth_client.get_authorization_url([Scopes['ACCOUNTING']])
         print(url)
-        if creds["REALM_ID"] == "<Fill-this-out-after-first-run>":
-            realm_id = ""
-        else:
-            realm_id = creds["REALM_ID"]
+
         if creds["AUTHORIZATION"] == "<Fill-this-out-after-first-run>":
             print("Need to click on link")
             exit(1)
         else:
             auth_code = creds["AUTHORIZATION"]
             if auth_2 == "":
-                self.auth_client.get_bearer_token(auth_code, realm_id=realm_id)
+                self.auth_client.get_bearer_token(auth_code, realm_id=self.REALM_ID)
         if auth_2 != "":
             auth_code = auth_2
             self.auth_client.access_token = auth_code
@@ -174,21 +184,3 @@ class Connection:
         else:
             print(f"Failed to fetch invoices: {response.text}")
         return response.status_code
-
-    def update_invoice(self, quick_id):
-        base_url = 'https://quickbooks.api.intuit.com'
-        url = '{0}/v3/company/{1}/invoice?operation=update'.format(base_url, self.auth_client.realm_id)
-        auth_header = 'Bearer {0}'.format(self.auth_client.access_token)
-        headers = {
-            'Authorization': auth_header,
-            'Accept': 'application/json',
-            'Content-Type': 'application/json'
-        }
-        data = {
-            "SyncToken": str(int(self.memo[quick_id]["sync"]) + 1),
-            "Id": quick_id,
-            "sparse": True,
-            "PrivateNote": self.memo[quick_id]["note"] + "\nJira Invoiced Status: True"
-        }
-        response3 = requests.post(url, headers=headers, json=data)
-        return response3.status_code

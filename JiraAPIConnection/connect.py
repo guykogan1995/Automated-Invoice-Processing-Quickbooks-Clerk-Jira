@@ -9,6 +9,7 @@ Description: This Python script connects to Jira and changes the tickets
 import requests
 from requests.auth import HTTPBasicAuth
 import json
+import sqlite3
 
 
 def update_jira(id_to_update):
@@ -20,14 +21,12 @@ def update_jira(id_to_update):
     """
 
     url = f"https://redfolderresearch.atlassian.net/rest/api/3/issue/{id_to_update}/transitions"
-    with open("Credentials.txt", "r") as f:
-        lines = f.readlines()
-        credentials = ""
-        for line in lines:
-            if "CREDENTIALS" in line:
-                credentials = line.split()[1]
-                break
-    auth = HTTPBasicAuth("tech@redfolderresearch.com", credentials)
+    con = sqlite3.connect("Jira-Quickbooks-sql.db")
+    cur = con.cursor()
+    res = cur.execute("SELECT identifier, value FROM Credentials WHERE identifier = 'jira_cred';")
+    jira_id = res.fetchone()[1]
+    auth = HTTPBasicAuth("tech@redfolderresearch.com", jira_id)
+    con.close()
 
     headers = {
         "Accept": "application/json",

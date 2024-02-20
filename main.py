@@ -3,17 +3,37 @@ File: connect.py
 Author: Guy Kogan
 Date: 1/15/2024
 Description: This Python script connects to the QuickBooks and checks if orders have been paid
-    if they are paid the reference to clerk and Jira is grabbed, In both cases, the script
-    will change in both of those the tickets to complete.
+    in Sqllite if the order has been paid then Jira is updated
 """
-import time
-
-import ClerkAPIConnection.connect
+import sqlite3
+import json
+import SqllitePushingToQuickbooks.connect
 import QuickBooksAPIConnection.connect
 import JiraAPIConnection.connect
 import logging
 from logging.handlers import TimedRotatingFileHandler
-import time
+from http.server import BaseHTTPRequestHandler, HTTPServer
+
+
+class RequestHandler(BaseHTTPRequestHandler):
+    def do_POST(self):
+        content_length = int(self.headers['Content-Length'])
+        post_data = self.rfile.read(content_length)
+        try:
+            response = SqllitePushingToQuickbooks.connect.parse_post_request(post_data)
+            self.send_response(200)
+            self.send_header('Content-type', 'application/json')
+            self.end_headers()
+            self.wfile.write(json.dumps(response).encode('utf-8'))
+        except Exception as e:
+            self.send_error(500, str(e))
+
+
+def run_server(server_class=HTTPServer, handler_class=RequestHandler, port=8000):
+    server_address = ('', port)
+    httpd = server_class(server_address, handler_class)
+    print(f'Server running on port {port}...')
+    httpd.serve_forever()
 
 
 if __name__ == '__main__':
@@ -30,58 +50,49 @@ if __name__ == '__main__':
     logger.setLevel(logging.INFO)
     logger.info('Connecting to QuickBooks...')
     qb_connect = QuickBooksAPIConnection.connect.Connection()
+    new_access_token, new_refresh_token = qb_connect.refresh_access_token(qb_connect.REFRESH_TOKEN,
+                                                                          qb_connect.CLIENT_ID,
+                                                                          qb_connect.CLIENT_SECRET)
+    con = sqlite3.connect("Jira-Quickbooks-sql.db")
+    cur = con.cursor()
+    cur.execute(f"UPDATE Credentials SET value = '{new_refresh_token}' WHERE identifier = 'refresh_token';")
+    con.commit()
+    con.close()
+    # run_server()
+    # response = SqllitePushingToQuickbooks.connect.parse_post_request(payload)
     if qb_connect.status != 200:
         logger.error('Unable to connect to quickbooks, status: ' + str(qb_connect.status))
         exit(1)
     logger.info("Successfully connected to QuickBooks")
-    while True:
-        for transaction in qb_connect.payed_transactions:
-            clerk_ref = qb_connect.payed_transactions[transaction]["Clerk Reference"]
-            logger.info('Searching Clerk with reference: ' + clerk_ref)
-            status = ClerkAPIConnection.connect.search_id(clerk_ref)
-            if int(status) in [0, 1, 3]:
-                logger.info('Clerk status is not done -> moving to done: ' + clerk_ref)
-                clerk_success = ClerkAPIConnection.connect.update_status(clerk_ref, "2", {'status': 2})
-                if clerk_success == 200:
-                    logger.info('Successfully changed clerk ref: ' + clerk_ref + " -> to done")
-                else:
-                    logger.warning('Clerk was not able to be changed to done: ' + clerk_ref)
-                jira_success = JiraAPIConnection.connect.update_jira(transaction)
-                if jira_success == 204:
-                    logger.info('Successfully changed Jira ticket: ' + transaction + " -> to done")
-                else:
-                    logger.warning('Jira ticket was not able to be changed to done: ' + transaction)
-                qb_update_success = qb_connect.update_invoice(qb_connect.payed_transactions[transaction]
-                                                              ["QuickBooks Ref"])
-                if qb_update_success == 200:
-                    logger.info('Successfully changed private memo of quickbooks: ' + transaction + " -> to invoiced")
-                else:
-                    logger.warning('Was not able to change private memo of quickbooks: ' + transaction)
-                print("-------------------------------------------------")
-                if clerk_success == 200 and jira_success == 204 and qb_update_success == 200:
-                    qb_ref = qb_connect.payed_transactions[transaction]["QuickBooks Ref"]
-                    str_reports_arr.append("-------------------------------------------------\n"
-                                           "Successfully moved tickets ------>\n"
-                                           f"Clerk Reference: {clerk_ref}\nJira Reference: {transaction}\n"
-                                           f"QuickBooks ID: {qb_ref}\n"
-                                           f"-------------------------------------------------")
-                    print("Successfully moved tickets ------>")
-                    print(f"""Clerk Reference: " + {clerk_ref}
-                    Jira Reference: {transaction}
-                    QuickBooks ID: {qb_ref}""")
-                    print("------> To Completed")
-                print("-------------------------------------------------")
-            else:
-                logger.warning('Clerk status is already done terminating ticket change: ' + clerk_ref)
-        if len(str_reports_arr) != 0:
-            logger.info("Changed " + str(len(str_reports_arr)) + " tickets to invoiced.")
-            logger.info(str_reports_arr)
+    con = sqlite3.connect("Jira-Quickbooks-sql.db")
+    cur = con.cursor()
+    for transaction in qb_connect.payed_transactions:
+        print("-------------------------------------------------")
+        jira_success = JiraAPIConnection.connect.update_jira(transaction)
+        if jira_success == 204:
+            res = cur.execute(f"UPDATE Invoices SET is_invoiced = '1' WHERE jira_id = '{transaction}';")
+            res = cur.execute(f"SELECT is_invoiced  FROM Invoices WHERE jira_id = '{transaction}';")
+            print(res.fetchone()[0])
+            logger.info('Successfully changed Jira ticket: ' + transaction + " -> to done")
+            qb_ref = qb_connect.payed_transactions[transaction]["QuickBooks Ref"]
+            str_reports_arr.append("-------------------------------------------------\n"
+                                   "Successfully moved tickets ------>\n"
+                                   f"Jira Reference: {transaction}\n"
+                                   f"QuickBooks ID: {qb_ref}\n"
+                                   f"-------------------------------------------------")
+            print("Successfully moved tickets ------>")
+            print(f"""Jira Reference: {transaction}
+                        QuickBooks ID: {qb_ref}""")
+            print("------> To Completed")
         else:
-            logger.info("No tickets were changed")
-        time.sleep(60 * 55)
-        new_access_token, new_refresh_token = qb_connect.refresh_access_token(qb_connect.REFRESH_TOKEN,
-                                                                              qb_connect.CLIENT_ID,
-                                                                              qb_connect.CLIENT_SECRET)
+            logger.warning('Jira ticket was not able to be changed to done: ' + transaction)
+        print("-------------------------------------------------")
+    if len(str_reports_arr) != 0:
+        logger.info("Changed " + str(len(str_reports_arr)) + " tickets to invoiced.")
+        logger.info(str_reports_arr)
+    else:
+        logger.info("No tickets were changed")
         qb_connect.run_connection(new_access_token, new_refresh_token)
+    con.close()
 
         

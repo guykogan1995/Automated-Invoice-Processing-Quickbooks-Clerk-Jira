@@ -1,43 +1,28 @@
 """
 Author: Kevin Crotteau
 """
-# Function to handle and parse POST request
 import json
-import requests  # For making API calls
-# For SQLite database interaction
 import sqlite3
 import requests
-import base64
 import xmltodict
+import QuickBooksAPIConnection.connect
 creds = {}
 
 
-def refresh_access_token(refresh_token, client_id, client_secret):
-    token_endpoint = 'https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer'
-    auth_header = base64.b64encode(f'{client_id}:{client_secret}'.encode()).decode()
-    headers = {
-        'Authorization': f'Basic {auth_header}',
-        'Content-Type': 'application/x-www-form-urlencoded'
-    }
-    data = {
-        'grant_type': 'refresh_token',
-        'refresh_token': refresh_token
-    }
-    response = requests.post(token_endpoint, headers=headers, data=data)
-
-    if response.status_code == 200:
-        new_tokens = response.json()
-        return new_tokens['access_token'], new_tokens['refresh_token']
-    else:
-        raise Exception(f"Failed to refresh token: {response.text}")
-
-
 def parse_post_request(request):
+
     try:
         # Connect to SQLite database
         conn = sqlite3.connect('Jira-Quickbooks-sql.db')
         cur = conn.cursor()
 
+        # data = json.loads(request)
+        data = request.json()
+        column = data['key']
+        result = cur.execute(f"SELECT * FROM Invoices WHERE jira_id = '{column}'")
+        val = result.fetchone()
+        if val is not None:
+            return "Invoice already exists!"
         # Execute a query to retrieve refreshToken and realmId
         clientId = cur.execute("SELECT identifier, value FROM Credentials WHERE identifier = 'client_id';").fetchone()[1]
         clientSecret = cur.execute("SELECT identifier, value FROM Credentials WHERE identifier = 'client_secret';").fetchone()[1]
@@ -47,7 +32,7 @@ def parse_post_request(request):
 
         # Attempt to refresh the access token
         try:
-            accessToken, new_refresh_token = refresh_access_token(refreshToken, clientId, clientSecret)
+            accessToken, new_refresh_token = QuickBooksAPIConnection.connect.refresh_access_token(refreshToken, clientId, clientSecret)
              #Update the database with the new token
             cur.execute(f"UPDATE Credentials SET value = '{new_refresh_token}' WHERE identifier = 'refresh_token';")
             cur.execute(f"UPDATE Credentials SET value = '{accessToken}' WHERE identifier = 'authorization_token';")
@@ -59,8 +44,8 @@ def parse_post_request(request):
         # Close the database connection
         conn.close()
         # Extract data from request body
-        #data = request.json
-        data = json.loads(request)
+        # data = request.json
+        # data = json.loads(request)
         customer_name = data['fields']['customfield_10002'][0]['name']
         qb_url = "https://quickbooks.api.intuit.com"
         # Fetch customer data
@@ -71,7 +56,7 @@ def parse_post_request(request):
             qb_cus_data = response.json()['QueryResponse']['Customer']
             print(qb_cus_data)
         else:
-            #add in logic to update db
+            # add in logic to update db
             print(f"Failed to fetch customers: {response.text}")
             
         # Find customer ID by matching the name
@@ -141,9 +126,25 @@ def parse_post_request(request):
         invoice_data = {
             "Line": Line,
             "CustomerRef": {"value": customer_id},
-            #"DocNumber": {"value": data['key']}
+            "CustomField":
+                [
+                    {
+                        "DefinitionId": "2",
+                        "StringValue": data['fields']['summary'],
+                        "Type": "StringType",
+                        "Name": "PLAINTIFF/CASE REF"
+                    },
+                    {
+                        "DefinitionId": "3",
+                        "StringValue": data['key'],
+                        "Type": "StringType",
+                        "Name": "CASE ID"
+                    }
+                ],
+        # "DocNumber": {"value": data['key']}
         }
-        
+
+
         add_invoice_response = requests.post(f"{qb_url}/v3/company/{companyCode}/invoice",
                                              json=invoice_data,
                                              headers={'Authorization': f'Bearer {accessToken}'})
@@ -154,9 +155,10 @@ def parse_post_request(request):
             conn = sqlite3.connect('Jira-Quickbooks-sql.db')
             cur = conn.cursor()
             cur.execute(f'INSERT INTO Invoices (jira_id, quickbooks_id) VALUES ("{jira_key}", "{qb_key}")')
+            conn.commit()
             return {'success': True, 'data': add_invoice_response}
         else:
-            #add in logic to update db
+            # add in logic to update db
             print(f"Failed to add invoice: {add_invoice_response.text}")
             return {'success': False, 'data': add_invoice_response}
 

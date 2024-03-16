@@ -11,28 +11,45 @@ import SqllitePushingToQuickbooks.connect
 import QuickBooksAPIConnection.connect
 import JiraAPIConnection.connect
 import logging
+import Test.test
 from logging.handlers import TimedRotatingFileHandler
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 
 class RequestHandler(BaseHTTPRequestHandler):
-    qb_connect = None
-    def do_post(self):
-        content_length = int(self.headers['Content-Length'])
-        post_data = self.rfile.read(content_length)
-        try:
-            response = SqllitePushingToQuickbooks.connect.parse_post_request(post_data)
-            self.send_response(200)
-            self.send_header('Content-type', 'application/json')
-            self.end_headers()
-            self.wfile.write(json.dumps(response).encode('utf-8'))
-            logic(qb_connect)
-        except Exception as e:
-            self.send_error(500, str(e))
+    #qb_connect = None
+    def do_POST(self):
+        print("Received POST request")
+        if self.path == '/api/test':
+            content_length = int(self.headers['Content-Length'])
+            post_data = self.rfile.read(content_length)
+            post_data = post_data.decode('utf-8')
+            #print(type(post_data))
+            try:
+                print("Sending request to parse")
+                print("post_data")
+                # Returns the quickbook payment link if successful
+                link = SqllitePushingToQuickbooks.connect.parse_post_request(post_data)
+                
+                if link is None:
+                    response = {"message": "Online payment is not enabled for this client."}
+                else:
+                    response = {"link": link}
+
+                self.send_response(200)
+                self.send_header('Content-type', 'application/json')
+                self.end_headers()
+                
+                # Sending the JSON response
+                self.wfile.write(json.dumps(response).encode('utf-8'))
+                
+                #logic(qb_connect)
+            except Exception as e:
+                self.send_error(500, str(e))
 
 
-def run_server(qb_con, server_class=HTTPServer, handler_class=RequestHandler, port=8000):
-    RequestHandler.qb_connect = qb_con
+def run_server(server_class=HTTPServer, handler_class=RequestHandler, port=8080):
+    #RequestHandler.qb_connect = qb_con
     server_address = ('', port)
     httpd = server_class(server_address, handler_class)
     print(f'Server running on port {port}...')
@@ -96,13 +113,10 @@ if __name__ == '__main__':
     logger.addHandler(handler)
     logger.setLevel(logging.INFO)
     logger.info('Connecting to QuickBooks...')
-    qb_connect = QuickBooksAPIConnection.connect.Connection()
-    new_access_token, new_refresh_token = QuickBooksAPIConnection.connect.refresh_access_token(qb_connect.REFRESH_TOKEN,
-                                                                                       qb_connect.CLIENT_ID,
-                                                                                       qb_connect.CLIENT_SECRET)
+    tokens = QuickBooksAPIConnection.connect.manual_oauth_flow()
     con = sqlite3.connect("Jira-Quickbooks-sql.db")
     cur = con.cursor()
-    cur.execute(f"UPDATE Credentials SET value = '{new_refresh_token}' WHERE identifier = 'refresh_token';")
+    cur.execute(f"UPDATE Credentials SET value = '{tokens['refresh_token']}' WHERE identifier = 'refresh_token';")
     con.commit()
     con.close()
-    run_server(qb_connect)
+    run_server()

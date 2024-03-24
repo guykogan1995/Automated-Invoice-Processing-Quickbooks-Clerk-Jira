@@ -16,7 +16,37 @@ import sqlite3
 # Constants which will be used to authenticate within Quickbooks
 REDIRECT_URI = 'https://developer.intuit.com/v2/OAuth2Playground/RedirectUrl'
 SANDBOX_ENVIRONMENT = 'production'
-creds = {}
+
+
+def test_access_token(access_token, company_code):
+    """
+    Tests if the provided access token is valid by attempting to fetch a single invoice.
+
+    :param access_token: The access token to be tested.
+    :param company_code: The company code needed for the QuickBooks API request.
+    :return: A tuple containing a boolean indicating whether the token is valid, and the data or error message.
+    """
+    base_url = 'https://quickbooks.api.intuit.com'
+    url = f"{base_url}/v3/company/{company_code}/query?query=SELECT * FROM Invoice MAXRESULTS 1"
+    auth_header = f'Bearer {access_token}'
+    headers = {
+        'Authorization': auth_header,
+        'Accept': 'application/json'
+    }
+    try:
+        response = requests.get(url, headers=headers)
+        # Check if the request was successful
+        if response.status_code == 200:
+            # Assuming the token is valid if a 200 status code is received
+            return True, response.json()
+        else:
+            # If the status code is not 200, assume the token is invalid
+            print(f"Failed to fetch invoices: {response.text}")
+            return False, response.text
+    except Exception as e:
+        # Handle exceptions for network issues or JSON parsing errors
+        print(f"An error occurred: {e}")
+        return False, str(e)
 
 
 def refresh_access_token(refresh_token, client_id, client_secret):

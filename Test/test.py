@@ -56,21 +56,74 @@ mapping_dict = {
         (62,65,80): {"qb_id": (232,381), "description": "Commercial Other"},
         (62,65,81): {"qb_id": (232,380), "description": "Commercial Other"},
         (62,68): {"qb_id": (232,379), "description": "Commercial Other"},
-        "DATE OF LOSS 1+ YEARS": {"qb_id": (249,), "description": ""}, 
-        "DATE OF LOSS 3+ YEARS": {"qb_id": (250,), "description": ""},
-        "DATE OF LOSS 5+ YEARS": {"qb_id": (251,), "description": ""},
-        "8 - HOUR RUSH REQUEST": {"qb_id": (361,), "description": ""},
-        "3 - HOUR RUSH REQUEST": {"qb_id": (255,), "description": ""},
-        "1 - DAY RUSH REQUEST": {"qb_id": (257,), "description": ""},
-        "3 - DAY RUSH REQUEST": {"qb_id": (248,), "description": ""},
-        "5 - DAY RUSH REQUEST": {"qb_id": (248,), "description": ""},
-        "POLICY NUMBER": {"qb_id": (259,), "description": ""},
-        "SKIP TRACE": {"qb_id": (286,), "description": ""},
-        "PROPERTY DAMAGE LIMITS": {"qb_id": (261,), "description": ""},
-        "POLICY PERIOD": {"qb_id": (260,), "description": ""},
-        "UM/UIM LIMITS": {"qb_id": (262,), "description": ""},
-        "UMBRELLA POLICY LIMITS": {"qb_id": (263,), "description": ""},
+            "DATE OF LOSS 1+ YEARS": {"qb_id": (249,), "description": ""}, 
+    "DATE OF LOSS 3+ YEARS": {"qb_id": (250,), "description": ""},
+    "DATE OF LOSS 5+ YEARS": {"qb_id": (251,), "description": ""},
+    "8 - HOUR RUSH REQUEST - $100.00": {"qb_id": (361,), "description": ""},
+    "3 - HOUR RUSH REQUEST - $300.00": {"qb_id": (255,), "description": ""},
+    "1 - DAY RUSH REQUEST - $75.00": {"qb_id": (257,), "description": ""},
+    "3 - DAY RUSH REQUEST - $50.00": {"qb_id": (248,), "description": ""},
+    "5 - DAY RUSH REQUEST - $25.00": {"qb_id": (248,), "description": ""},
+    "POLICY NUMBER": {"qb_id": (259,), "description": ""},
+    "SKIP TRACE": {"qb_id": (286,), "description": ""},
+    "PROPERTY DAMAGE LIMITS": {"qb_id": (261,), "description": ""},
+    "POLICY PERIOD": {"qb_id": (260,), "description": ""},
+    "UM/UIM LIMITS": {"qb_id": (262,), "description": ""},
+    "UMBRELLA POLICY LIMITS": {"qb_id": (263,), "description": ""},
         }
+
+custom_pricing_rules = {
+"Kevin Test Company": {
+232: 700,
+225: 375,
+229: 500,
+223: 175,
+315: 375,
+224: 225,
+372: -375, #no hit commercial
+},
+"WILSHIRE LAW FIRM": {
+232: 700,
+225: 375,
+229: 500,
+223: 175,
+315: 375,
+224: 225,
+372: -375, #no hit commercial
+},
+"CALIFORNIA ACCIDENT FIRM":{
+225: 375,
+},
+"CARPENTER & ZUCKERMAN":{
+223: 175,
+},
+"DANIEL STARK INJURY LAWYERS":{
+315: 375,
+},
+"MORGAN & MORGAN":{
+224: 250,
+}
+}
+
+
+def apply_custom_pricing(lines, organization):
+    """
+    Applies custom pricing rules to line items for a specific organization.
+
+    Args:
+    - lines (list of dictionaries): The line items with their original pricing.
+    - organization (str): The name of the client organization.
+
+    Updates the 'Amount' in each applicable line item dictionary in `lines`.
+    """
+    if organization in custom_pricing_rules:
+        for line in lines:
+            qb_id_str = line['SalesItemLineDetail']['ItemRef']['value']
+            qb_id = int(qb_id_str)  # Convert ID back to integer for matching
+            
+            if qb_id in custom_pricing_rules[organization]:
+                new_price = custom_pricing_rules[organization][qb_id]
+                line['Amount'] = str(new_price)  # Update the price, ensure it's a string
 
 def extract_base_items(input_str):
     """
@@ -219,6 +272,12 @@ def extract_info_with_organization(payload, realm_id, new_access_token):
     if summary_match:
         summary = summary_match.group(1)
 
+    rfr_casenumber_match = re.search(r'"NewKey-CaseNumber":"([^"]+)"', payload)
+    if rfr_casenumber_match:
+        rfr_casenumber = rfr_casenumber_match.group(1)
+    else:
+        rfr_casenumber = 'No Case Number Set'
+
     # Extract Assignee Email
     assignee_match = re.search(r'"NewKey-Assignee":\s*"([^"]*)"', payload)
     if assignee_match:
@@ -233,6 +292,15 @@ def extract_info_with_organization(payload, realm_id, new_access_token):
     requester_match = re.search(r'"NewKey-Requester":"([^"]+)"', payload)
     if requester_match:
         requester_name = requester_match.group(1)
+
+    
+    # Search for "NewKey-Researcher" and extract the name
+    researcher_match = re.search(r'"NewKey-Researcher":"([^"]+)"', payload)
+    researcher_name = researcher_match.group(1) if researcher_match else None
+    
+    # Search for "NewKey-ResearcherTwo" and extract the name
+    researcher_two_match = re.search(r'"NewKey-ResearcherTwo":"([^"]+)"', payload)
+    researcher_two_name = researcher_two_match.group(1) if researcher_two_match else None
 
 
     # Extract and handle NewKey-discount
@@ -255,6 +323,8 @@ def extract_info_with_organization(payload, realm_id, new_access_token):
             # Check if it's the 4th, 5th, or 6th item since these are Upsells
             if 4 <= base_item_json[0] <= 6:
                 qb_id_info['description'] = "Additional Policy Found: " + qb_id_info['description']
+                if (qb_id_info['qb_id'] == (225,263)) or (qb_id_info['qb_id'] ==  (223,263)):
+                    qb_id_info['qb_id'] = (263,)
             qb_ids_to_query.append(qb_id_info)
 
     print('parsing dol')
@@ -317,6 +387,10 @@ def extract_info_with_organization(payload, realm_id, new_access_token):
                 "Description": qb_info['description'].upper()  # Or use a more suitable description as needed
                 })
 
+    
+    apply_custom_pricing(Lines, organization)
+    
     print(Lines)
-    return data_key, Lines, organization, summary, reporter_email, requester_name
+
+    return data_key, Lines, organization, summary, reporter_email, requester_name, researcher_name, researcher_two_name, rfr_casenumber
             

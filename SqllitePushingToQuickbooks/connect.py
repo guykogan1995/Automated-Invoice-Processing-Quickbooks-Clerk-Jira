@@ -8,7 +8,48 @@ import xmltodict
 import QuickBooksAPIConnection.connect
 import Test.test
 import xml.etree.ElementTree as ET
+import re
 creds = {}
+
+
+def truncate_to_case_number(original_string, max_length):
+    """
+    Processes the original string based on several conditions:
+    - Removes "#N/A" if present.
+    - Returns the original string if it's within the max_length limit.
+    - Extracts and returns the case number if the string exceeds max_length.
+    - If no case number is found but the string is too long, tries to keep the last name.
+
+    Args:
+    - original_string (str): The original string to be processed.
+    - max_length (int): The maximum length of the string.
+
+    Returns:
+    - str: The processed string according to the specified rules.
+    """
+    # Remove "#N/A" if present, case-insensitively
+    refined_string = re.sub(r"#N/A", "", original_string, flags=re.IGNORECASE)
+    
+    # Check if the refined string is within the maximum length limit
+    if len(refined_string) <= max_length:
+        return refined_string
+
+    # Attempt to extract the case number
+    match = re.search(r"#(\w+)", refined_string)
+    if match:
+        return match.group(1)
+
+    # If no case number is found and the string is too long,
+    # try to truncate the first name and leave the last name.
+    words = refined_string.split()
+    if len(words) > 1:
+        last_name = words[-1]  # Assume the last word is the last name
+        # Try to keep as much of the last name as possible
+        truncated_last_name = last_name[:max_length] if len(last_name) > max_length else last_name
+        return truncated_last_name
+    else:
+        # If there's only one word, truncate it to the maximum length
+        return refined_string[:max_length]
 
 
 def parse_post_request(request):
@@ -37,7 +78,7 @@ def parse_post_request(request):
             raise e  # Re-raise the exception to handle it in the outer try-except block
         
         print("Begin Parsing Request")
-        data_key, Lines, customer_name, summary, reporter_email, requester_name = Test.test.extract_info_with_organization(request, companyCode, accessToken)
+        data_key, Lines, customer_name, summary, reporter_email, requester_name,researcher_name, researcher_two_name, rfr_casenumber = Test.test.extract_info_with_organization(request, companyCode, accessToken)
         
         print("Connecting to DB to check for invoice duplication")
         conn = sqlite3.connect('Jira-Quickbooks-sql.db')
@@ -79,7 +120,14 @@ def parse_post_request(request):
                 customer_email = reporter_email
             else:
                 print('reporter email is null')
+        try:
+            case_number = summary.split('#')[1]
+        except IndexError:
+            case_number = 'No case number present'
 
+        summary = truncate_to_case_number(summary, 30)
+        if researcher_two_name is not None:
+            researcher_name = f'{researcher_name}, {researcher_two_name}'
         
         invoice_data = {
             "Line": Lines,
@@ -88,7 +136,7 @@ def parse_post_request(request):
                 [
                     {
                         "DefinitionId": "1",
-                        "StringValue": requester_name,
+                        "StringValue": requester_name.upper(),
                         "Type": "StringType",
                         "Name": "REQUESTER'S NAME"
                     },
@@ -108,6 +156,13 @@ def parse_post_request(request):
                 "BillEmail": {
                     "Address": customer_email
                 },
+                "PrivateNote": f"{researcher_name.upper()}",
+                "CustomerMemo": {
+                    "value": rfr_casenumber
+                    },
+                "EmailStatus":"NeedToSend",
+                "AllowOnlineACHPayment":True,
+                "AllowOnlineCreditCardPayment":True,
                 # "DocNumber": {"value": data['key']}
         }
         

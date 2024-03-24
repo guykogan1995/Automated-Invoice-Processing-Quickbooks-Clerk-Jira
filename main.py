@@ -113,10 +113,35 @@ if __name__ == '__main__':
     logger.addHandler(handler)
     logger.setLevel(logging.INFO)
     logger.info('Connecting to QuickBooks...')
-    tokens = QuickBooksAPIConnection.connect.manual_oauth_flow()
-    con = sqlite3.connect("Jira-Quickbooks-sql.db")
-    cur = con.cursor()
-    cur.execute(f"UPDATE Credentials SET value = '{tokens['refresh_token']}' WHERE identifier = 'refresh_token';")
-    con.commit()
-    con.close()
+    try:
+        # Attempt to fetch and refresh tokens
+        conn = sqlite3.connect('Jira-Quickbooks-sql.db')
+        cur = conn.cursor()
+        clientId = cur.execute("SELECT identifier, value FROM Credentials WHERE identifier = 'client_id';").fetchone()[1]
+        clientSecret = cur.execute("SELECT identifier, value FROM Credentials WHERE identifier = 'client_secret';").fetchone()[1]
+        refreshToken = cur.execute("SELECT identifier, value FROM Credentials WHERE identifier = 'refresh_token';").fetchone()[1]
+        companyCode = cur.execute("SELECT identifier, value FROM Credentials WHERE identifier = 'realm_id';").fetchone()[1]
+        accessToken, new_refresh_token = QuickBooksAPIConnection.connect.refresh_access_token(refreshToken, clientId, clientSecret)
+
+        # Test the new access token with a generic GET request to QuickBooks
+        is_valid, data_or_error = QuickBooksAPIConnection.connect.test_access_token(accessToken, companyCode)
+        if is_valid:
+             # If successful, update the refresh token in the database
+            cur.execute(f"UPDATE Credentials SET value = '{new_refresh_token}' WHERE identifier = 'refresh_token';")
+            conn.commit()
+            print("Access token is valid. Data:", data_or_error)
+        else:
+            print("Access token might be invalid or an error occurred:", data_or_error)
+            # If refresh fails, fall back to manual OAuth flow
+            logger.info('Refreshing token failed, performing manual OAuth flow...')
+            print('Refreshing token failed, performing manual OAuth flow...')
+            tokens = QuickBooksAPIConnection.connect.manual_oauth_flow()
+            cur.execute(f"UPDATE Credentials SET value = '{tokens['refresh_token']}' WHERE identifier = 'refresh_token';")
+            conn.commit()
+    except Exception as e:
+        # If refresh fails, fall back to manual OAuth flow
+        logger.info('error occurred: ' + str(e))
+        print('error occurred: ' + str(e))
+    finally:
+        conn.close()
     run_server()

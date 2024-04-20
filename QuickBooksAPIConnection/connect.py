@@ -117,3 +117,56 @@ def manual_oauth_flow():
     else:
         print("Failed to obtain tokens")
         return None
+
+
+def get_paid_transactions(accessToken, companyCode):
+    """This function takes 2 strings: access token, and company code
+    param accessToken: String, This is the access token for qb\n
+    param companyCode: int this is the company code\n
+    """
+    con = sqlite3.connect("Jira-Quickbooks-sql.db")
+    cur = con.cursor()
+    res = cur.execute("SELECT quickbooks_id FROM Invoices WHERE is_invoiced = '0'")
+    qb_ids = res.fetchall()
+
+    base_url = 'https://quickbooks.api.intuit.com'
+    formatted_ids = ', '.join([f"'{id[0]}'" for id in qb_ids])  # Format invoice IDs for the query
+    query = f"SELECT Id, TotalAmt FROM Invoice WHERE Balance = '0' AND Id IN ({formatted_ids})"
+    url = f"{base_url}/v3/company/{companyCode}/query?query={query}"
+    headers = {
+        'Authorization': f'Bearer {accessToken}',
+        'Accept': 'application/json'
+    }
+
+    try:
+        response = requests.get(url, headers=headers)
+        response.raise_for_status()  # Raises an HTTPError if the response was an error
+        invoices_data = response.json()
+        print(invoices_data['QueryResponse'])
+        if len(invoices_data['QueryResponse']) == 0:
+            print("No invoices found")
+            return None
+        invoices_dict = {}
+
+        for invoice in invoices_data['QueryResponse']['Invoice']:
+            quickbooks_id = invoice['Id']
+            jira_id_query = cur.execute("SELECT jira_id FROM Invoices WHERE quickbooks_id = ?", (quickbooks_id,))
+            jira_id = jira_id_query.fetchone()
+
+            if jira_id:
+                invoices_dict[jira_id[0]] = quickbooks_id
+
+        con.close()
+        return invoices_dict if invoices_dict else None
+
+    except requests.exceptions.RequestException as e:
+        print(f"Request failed: {e}")
+        return None
+    except KeyError:
+        print("Unexpected response format")
+        return None
+    except sqlite3.Error as e:
+        print(f"Database error: {e}")
+        return None
+    finally:
+        con.close()

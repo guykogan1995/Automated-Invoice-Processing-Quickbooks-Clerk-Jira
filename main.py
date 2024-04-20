@@ -43,61 +43,17 @@ class RequestHandler(BaseHTTPRequestHandler):
                 # Sending the JSON response
                 self.wfile.write(json.dumps(response).encode('utf-8'))
                 
-                #logic(qb_connect)
+                JiraAPIConnection.connect.move_jira_tickets()
+
             except Exception as e:
                 self.send_error(500, str(e))
 
 
 def run_server(server_class=HTTPServer, handler_class=RequestHandler, port=8080):
-    #RequestHandler.qb_connect = qb_con
     server_address = ('', port)
     httpd = server_class(server_address, handler_class)
     print(f'Server running on port {port}...')
     httpd.serve_forever()
-
-
-def logic(qb_con):
-    qb_connect = qb_con
-    if qb_connect.status != 200:
-        logger.error('Unable to connect to quickbooks, status: ' + str(qb_connect.status))
-        exit(1)
-    logger.info("Successfully connected to QuickBooks")
-    con = sqlite3.connect("Jira-Quickbooks-sql.db")
-    cur = con.cursor()
-    for transaction in qb_connect.payed_transactions:
-        print("-------------------------------------------------")
-        jira_success = JiraAPIConnection.connect.update_jira(transaction)
-        if jira_success == 204:
-            res = cur.execute(f"UPDATE Invoices SET is_invoiced = '1' WHERE jira_id = '{transaction}';")
-            logger.info('Successfully changed Jira ticket: ' + transaction + " -> to done")
-            qb_ref = qb_connect.payed_transactions[transaction]["QuickBooks Ref"]
-            # remove sqllite code push does this
-            cur.execute(f"UPDATE Invoices SET quickbooks_id = '{qb_ref}' WHERE jira_id = '{transaction}';")
-            logger.info("-------------------------------------------------\n"
-                                   "Successfully moved tickets ------>\n"
-                                   f"Jira Reference: {transaction}\n"
-                                   f"QuickBooks ID: {qb_ref}\n"
-                                   f"-------------------------------------------------")
-            str_reports_arr.append("-------------------------------------------------\n"
-                                   "Successfully moved tickets ------>\n"
-                                   f"Jira Reference: {transaction}\n"
-                                   f"QuickBooks ID: {qb_ref}\n"
-                                   f"-------------------------------------------------")
-            print("Successfully moved tickets ------>")
-            print(f"""Jira Reference: {transaction}
-                        QuickBooks ID: {qb_ref}""")
-            print("------> To Completed")
-            con.commit()
-        else:
-            logger.warning('Jira ticket was not able to be changed to done: ' + transaction)
-        print("-------------------------------------------------")
-    if len(str_reports_arr) != 0:
-        logger.info("Changed " + str(len(str_reports_arr)) + " tickets to invoiced.")
-        logger.info(str_reports_arr)
-    else:
-        logger.info("No tickets were changed")
-        # qb_connect.run_connection(new_access_token, new_refresh_token)
-    con.close()
 
 
 if __name__ == '__main__':
@@ -114,34 +70,36 @@ if __name__ == '__main__':
     logger.setLevel(logging.INFO)
     logger.info('Connecting to QuickBooks...')
     try:
-        # Attempt to fetch and refresh tokens
-        conn = sqlite3.connect('Jira-Quickbooks-sql.db')
-        cur = conn.cursor()
-        clientId = cur.execute("SELECT identifier, value FROM Credentials WHERE identifier = 'client_id';").fetchone()[1]
-        clientSecret = cur.execute("SELECT identifier, value FROM Credentials WHERE identifier = 'client_secret';").fetchone()[1]
-        refreshToken = cur.execute("SELECT identifier, value FROM Credentials WHERE identifier = 'refresh_token';").fetchone()[1]
-        companyCode = cur.execute("SELECT identifier, value FROM Credentials WHERE identifier = 'realm_id';").fetchone()[1]
-        accessToken, new_refresh_token = QuickBooksAPIConnection.connect.refresh_access_token(refreshToken, clientId, clientSecret)
+        with sqlite3.connect('Jira-Quickbooks-sql.db') as conn:
+            cur = conn.cursor()
+            # Fetching credentials in a more secure way
+            identifiers = ('client_id', 'client_secret', 'refresh_token', 'realm_id', 'jira_cred')
+            placeholders = ', '.join(['?'] * len(identifiers))
+            cur.execute(f"SELECT identifier, value FROM Credentials WHERE identifier IN ({placeholders})", identifiers)
+            credentials = {row[0]: row[1] for row in cur.fetchall()}
 
-        # Test the new access token with a generic GET request to QuickBooks
-        is_valid, data_or_error = QuickBooksAPIConnection.connect.test_access_token(accessToken, companyCode)
-        if is_valid:
-             # If successful, update the refresh token in the database
-            cur.execute(f"UPDATE Credentials SET value = '{new_refresh_token}' WHERE identifier = 'refresh_token';")
-            conn.commit()
-            print("Access token is valid. Data:", data_or_error)
-        else:
-            print("Access token might be invalid or an error occurred:", data_or_error)
-            # If refresh fails, fall back to manual OAuth flow
-            logger.info('Refreshing token failed, performing manual OAuth flow...')
-            print('Refreshing token failed, performing manual OAuth flow...')
-            tokens = QuickBooksAPIConnection.connect.manual_oauth_flow()
-            cur.execute(f"UPDATE Credentials SET value = '{tokens['refresh_token']}' WHERE identifier = 'refresh_token';")
-            conn.commit()
+            # Assuming QuickBooksAPIConnection methods handle exceptions internally and log appropriately
+            accessToken, new_refresh_token = QuickBooksAPIConnection.connect.refresh_access_token(
+                credentials['refresh_token'], credentials['client_id'], credentials['client_secret'])
+
+            # Test the new access token with a generic GET request to QuickBooks
+            is_valid, data_or_error = QuickBooksAPIConnection.connect.test_access_token(accessToken, credentials['realm_id'])
+            if is_valid:
+                # If successful, update the refresh token in the database
+                cur.execute("UPDATE Credentials SET value = ? WHERE identifier = 'refresh_token';", (new_refresh_token,))
+                conn.commit()
+                print("Access token is valid. Data:", data_or_error)
+            else:
+                print("Access token might be invalid or an error occurred:", data_or_error)
+                logger.info('Refreshing token failed, performing manual OAuth flow...')
+                print('Refreshing token failed, performing manual OAuth flow...')
+                tokens = QuickBooksAPIConnection.connect.manual_oauth_flow()
+                cur.execute("UPDATE Credentials SET value = ? WHERE identifier = 'refresh_token';", (tokens['refresh_token'],))
+                conn.commit()
     except Exception as e:
-        # If refresh fails, fall back to manual OAuth flow
-        logger.info('error occurred: ' + str(e))
-        print('error occurred: ' + str(e))
+        logger.error('An error occurred during token refresh: ' + str(e))
     finally:
-        conn.close()
+        conn.close()    
+
     run_server()
+    #JiraAPIConnection.connect.move_jira_tickets()

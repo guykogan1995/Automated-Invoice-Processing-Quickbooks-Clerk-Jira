@@ -4,15 +4,15 @@ import requests
 
 mapping_dict = {
         (25,): {"qb_id": (223,), "description": "Auto Policy Limits"},
-        (25,29): {"qb_id": (224,), "description": "Specialty Carrier Auto Policy Limits"},
+        (25,29): {"qb_id": (321,), "description": "Specialty Carrier Auto Policy Limits"},
         (25,32): {"qb_id": (315,), "description": "AAA California Auto Policy Limits"},
         (25,87): {"qb_id": (223,363,), "description": "No-Hit Auto Policy Limits"},
         (26,): {"qb_id": (223,), "description": "Homeowners or Renters Policy Limits"},
-        (26,30): {"qb_id": (224,), "description": "Specialty Homeowners or Renters Policy Limits"},
+        (26,30): {"qb_id": (321,), "description": "Specialty Homeowners or Renters Policy Limits"},
         (26,33): {"qb_id": (315,), "description": "AAA California Homeowners or Renters Policy Limits"},
         (26,88): {"qb_id": (223,363), "description": "No-Hit Homeowners or Renters Policy Limits"},
         (69,): {"qb_id": (223,263), "description": "Umbrella Policy Limits"},
-        (69,70): {"qb_id": (224,), "description": "Specialty Carrier Umbrella Policy Limits"},
+        (69,70): {"qb_id": (321,), "description": "Specialty Carrier Umbrella Policy Limits"},
         (69,71): {"qb_id": (315,), "description": "AAA California Specialty Carrier Umbrella Policy Limits"},
         (28,): {"qb_id": (266,), "description": "International Auto Policy Limits"},
         (28,89): {"qb_id": (00), "description": "No Hit - International Auto Policy Limits"}, #need this one
@@ -63,7 +63,7 @@ mapping_dict = {
     "3 - HOUR RUSH REQUEST - $300.00": {"qb_id": (255,), "description": ""},
     "1 - DAY RUSH REQUEST - $75.00": {"qb_id": (257,), "description": ""},
     "3 - DAY RUSH REQUEST - $50.00": {"qb_id": (248,), "description": ""},
-    "5 - DAY RUSH REQUEST - $25.00": {"qb_id": (248,), "description": ""},
+    "5 - DAY RUSH REQUEST - $25.00": {"qb_id": (258,), "description": ""},
     "POLICY NUMBER": {"qb_id": (259,), "description": ""},
     "SKIP TRACE": {"qb_id": (286,), "description": ""},
     "PROPERTY DAMAGE LIMITS": {"qb_id": (261,), "description": ""},

@@ -55,30 +55,26 @@ def truncate_to_case_number(original_string, max_length):
 def parse_post_request(request):
     try:
         print("Connecting to DB for Credentials")
-        # Connect to SQLite database
-        conn = sqlite3.connect('Jira-Quickbooks-sql.db')
-        cur = conn.cursor()
-        print("DB connected")
-        # Execute a query to retrieve refreshToken and realmId
-        clientId = cur.execute("SELECT identifier, value FROM Credentials WHERE identifier = 'client_id';").fetchone()[1]
-        clientSecret = cur.execute("SELECT identifier, value FROM Credentials WHERE identifier = 'client_secret';").fetchone()[1]
-        refreshToken = cur.execute("SELECT identifier, value FROM Credentials WHERE identifier = 'refresh_token';").fetchone()[1]
-        companyCode = cur.execute("SELECT identifier, value FROM Credentials WHERE identifier = 'realm_id';").fetchone()[1]
-
-        # Attempt to refresh the access token
+        with sqlite3.connect('Jira-Quickbooks-sql.db') as conn:
+            cur = conn.cursor()
+            # Fetching credentials in a more secure way
+            identifiers = ('client_id', 'client_secret', 'refresh_token', 'realm_id')
+            placeholders = ', '.join(['?'] * len(identifiers))
+            cur.execute(f"SELECT identifier, value FROM Credentials WHERE identifier IN ({placeholders})", identifiers)
+            credentials = {row[0]: row[1] for row in cur.fetchall()}
         try:
             print("refreshing connection")
-            accessToken, new_refresh_token = QuickBooksAPIConnection.connect.refresh_access_token(refreshToken, clientId, clientSecret)
-            #Update the database with the new token
+            accessToken, new_refresh_token = QuickBooksAPIConnection.connect.refresh_access_token(
+                credentials['refresh_token'], credentials['client_id'], credentials['client_secret'])
+             #Update the database with the new token
             cur.execute(f"UPDATE Credentials SET value = '{new_refresh_token}' WHERE identifier = 'refresh_token';")
             cur.execute(f"UPDATE Credentials SET value = '{accessToken}' WHERE identifier = 'authorization_token';")
             conn.commit()
         except Exception as e:
             conn.close()
             raise e  # Re-raise the exception to handle it in the outer try-except block
-        
         print("Begin Parsing Request")
-        data_key, Lines, customer_name, summary, reporter_email, requester_name,researcher_name, researcher_two_name, rfr_casenumber = Test.test.extract_info_with_organization(request, companyCode, accessToken)
+        data_key, Lines, customer_name, summary, reporter_email, requester_name,researcher_name, researcher_two_name, rfr_casenumber = Test.test.extract_info_with_organization(request, credentials['realm_id'], accessToken)
         
         print("Connecting to DB to check for invoice duplication")
         conn = sqlite3.connect('Jira-Quickbooks-sql.db')
@@ -95,7 +91,7 @@ def parse_post_request(request):
         qb_url = "https://quickbooks.api.intuit.com"
         # Fetch customer data
         print(f"fetching customer: {customer_name}")
-        response = requests.get(f"{qb_url}/v3/company/{companyCode}/query?query=SELECT * FROM Customer where DisplayName = '{customer_name}'",
+        response = requests.get(f"{qb_url}/v3/company/{credentials['realm_id']}/query?query=SELECT * FROM Customer where DisplayName = '{customer_name}'",
                                 headers={'Authorization': f'Bearer {accessToken}',
                                         'Accept': 'application/json'})
         if response.status_code == 200:
@@ -172,7 +168,7 @@ def parse_post_request(request):
             invoice_data["SalesTermRef"] = {"value": sales_term}
 
         print("sending invoice")
-        add_invoice_response = requests.post(f"{qb_url}/v3/company/{companyCode}/invoice",
+        add_invoice_response = requests.post(f"{qb_url}/v3/company/{credentials['realm_id']}/invoice",
                                              json=invoice_data,
                                              headers={'Authorization': f'Bearer {accessToken}'})
         
@@ -185,7 +181,7 @@ def parse_post_request(request):
             cur.execute(f'INSERT INTO Invoices (jira_id, quickbooks_id) VALUES ("{jira_key}", "{qb_key}")')
             conn.commit()
             print(f'Added {jira_key} to database')
-            link =  get_payment_link(add_invoice_response, companyCode, accessToken)
+            link =  get_payment_link(add_invoice_response, credentials['realm_id'], accessToken)
             return {'success': True, 'data': link}
         else:
             # add in logic to update db

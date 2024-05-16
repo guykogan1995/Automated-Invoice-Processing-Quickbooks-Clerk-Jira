@@ -133,3 +133,54 @@ def update_jira(id_to_update, auth_id):
 
     return invoiced_status_check.status_code
 
+
+
+
+
+def manage_jira_forms(issue_key, cloud_id, email, api_token):
+    # Set up authentication and headers
+    auth = HTTPBasicAuth(email, api_token)
+    headers = {"Accept": "application/json", "Content-Type": "application/json","X-ExperimentalApi": "opt-in"}
+
+    # Formulate URL to fetch forms
+    get_forms_url = f"https://api.atlassian.com/jira/forms/cloud/{cloud_id}/issue/{issue_key}/form"
+
+    # Send request to get all forms
+    forms_response = requests.get(get_forms_url, headers=headers, auth=auth)
+    if forms_response.status_code != 200:
+        return "Failed to fetch forms"
+
+    # Parse response JSON
+    forms = forms_response.json()
+
+    # Check if no forms are attached to the issue
+    if not forms:
+        return "No forms attached to this issue."
+
+    # Filter forms where name contains "results", case insensitive
+    matching_forms = [form for form in forms if "results" in form["name"].lower()]
+
+    # Process each form to submit first and then change visibility if internal
+    results = []
+    for form in matching_forms:
+        form_id = form["id"]
+
+        # Submit the form first
+        submit_form_url = f"https://api.atlassian.com/jira/forms/cloud/{cloud_id}/issue/{issue_key}/form/{form_id}/action/submit"
+        submit_response = requests.put(submit_form_url, headers=headers, auth=auth)
+        if submit_response.status_code == 200:
+            results.append(f"Form {form_id} submitted successfully.")
+
+            # Only make external if it's internal
+            if form["internal"]:
+                change_visibility_url = f"https://api.atlassian.com/jira/forms/cloud/{cloud_id}/issue/{issue_key}/form/{form_id}/action/external"
+                external_response = requests.put(change_visibility_url, headers=headers, auth=auth)
+                if external_response.status_code == 200:
+                    results.append(f"Form {form_id} made external successfully.")
+                else:
+                    results.append(f"Failed to make form {form_id} external.")
+        else:
+            results.append(f"Failed to submit form {form_id}.")
+
+    return results if results else "No matching forms to process."
+

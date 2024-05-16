@@ -6,9 +6,11 @@ import sqlite3
 import requests
 import xmltodict
 import QuickBooksAPIConnection.connect
+import JiraAPIConnection.connect
 import Test.test
 import xml.etree.ElementTree as ET
 import re
+import urllib.parse
 creds = {}
 
 
@@ -58,7 +60,7 @@ def parse_post_request(request):
         with sqlite3.connect('Jira-Quickbooks-sql.db') as conn:
             cur = conn.cursor()
             # Fetching credentials in a more secure way
-            identifiers = ('client_id', 'client_secret', 'refresh_token', 'realm_id')
+            identifiers = ('client_id', 'client_secret', 'refresh_token', 'realm_id', 'jira_id', 'cloud_id')
             placeholders = ', '.join(['?'] * len(identifiers))
             cur.execute(f"SELECT identifier, value FROM Credentials WHERE identifier IN ({placeholders})", identifiers)
             credentials = {row[0]: row[1] for row in cur.fetchall()}
@@ -91,9 +93,11 @@ def parse_post_request(request):
         qb_url = "https://quickbooks.api.intuit.com"
         # Fetch customer data
         print(f"fetching customer: {customer_name}")
-        response = requests.get(f"{qb_url}/v3/company/{credentials['realm_id']}/query?query=SELECT * FROM Customer where DisplayName = '{customer_name}'",
-                                headers={'Authorization': f'Bearer {accessToken}',
-                                        'Accept': 'application/json'})
+        query = f"SELECT * FROM Customer WHERE CompanyName = '{customer_name}'"
+        encoded_query = urllib.parse.quote(query)
+
+        response = requests.get(f"{qb_url}/v3/company/{credentials['realm_id']}/query?query={encoded_query}",
+        headers={'Authorization': f'Bearer {accessToken}','Accept': 'application/json'})
         if response.status_code == 200:
             qb_cus_data = response.json()['QueryResponse']['Customer']
             print(f'Customer found: {qb_cus_data}')
@@ -117,14 +121,16 @@ def parse_post_request(request):
             else:
                 print('reporter email is null')
         try:
-            case_number = summary.split('#')[1]
+            case_number = summary.split('#')[0]
         except IndexError:
             case_number = 'No case number present'
 
         summary = truncate_to_case_number(summary, 30)
         if researcher_two_name is not None:
-            researcher_name = f'{researcher_name}, {researcher_two_name}'
-        
+            researcher_name = f'A-Day: {researcher_name}, B-Day: {researcher_two_name}'
+        else:
+            researcher_name = f'Original Researcher: {researcher_name}'
+
         invoice_data = {
             "Line": Lines,
             "CustomerRef": {"value": customer_id},
@@ -154,7 +160,7 @@ def parse_post_request(request):
                 },
                 "PrivateNote": f"{researcher_name.upper()}",
                 "CustomerMemo": {
-                    "value": rfr_casenumber
+                    "value": data_key
                     },
                 "EmailStatus":"NeedToSend",
                 "AllowOnlineACHPayment":True,
@@ -182,7 +188,8 @@ def parse_post_request(request):
             conn.commit()
             print(f'Added {jira_key} to database')
             link =  get_payment_link(add_invoice_response, credentials['realm_id'], accessToken)
-            return {'success': True, 'data': link}
+            forms_response = JiraAPIConnection.connect.manage_jira_forms(jira_key, credentials['cloud_id'], 'tech@redfolderresearch.com', credentials['jira_id'] )
+            return {'success': True, 'data': link, 'forms_status': forms_response}
         else:
             # add in logic to update db
             print(f"Failed to add invoice: {add_invoice_response.text}")

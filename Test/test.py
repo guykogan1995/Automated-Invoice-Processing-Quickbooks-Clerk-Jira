@@ -16,15 +16,15 @@ mapping_dict = {
         (69,71): {"qb_id": (315,), "description": "AAA California Specialty Carrier Umbrella Policy Limits"},
         (28,): {"qb_id": (266,), "description": "International Auto Policy Limits"},
         (28,89): {"qb_id": (00), "description": "No Hit - International Auto Policy Limits"}, #need this one
-        (40,): {"qb_id": (225,), "description": "Auto"},
-        (40,44): {"qb_id": (225,263), "description": "Auto"},
-        (40,82): {"qb_id": (225,372), "description": "Auto"},
-        (41,): {"qb_id": (225,), "description": "General"},
-        (41,45): {"qb_id": (225,263), "description": "General"},
-        (41,83): {"qb_id": (225,372), "description": "General"},
-        (46,): {"qb_id": (225,), "description": "Other"},
-        (46,47): {"qb_id": (225,263), "description": "Other"},
-        (46,85): {"qb_id": (225,372), "description": "Other"},
+        (40,): {"qb_id": (225,), "description": "COMMERCIAL POLICY LIMITS"},
+        (40,44): {"qb_id": (225,263), "description": "COMMERCIAL POLICY LIMITS"},
+        (40,82): {"qb_id": (225,372), "description": "COMMERCIAL POLICY LIMITS"},
+        (41,): {"qb_id": (225,), "description": "COMMERCIAL POLICY LIMITS"},
+        (41,45): {"qb_id": (225,263), "description": "COMMERCIAL POLICY LIMITS"},
+        (41,83): {"qb_id": (225,372), "description": "COMMERCIAL POLICY LIMITS"},
+        (46,): {"qb_id": (225,), "description": "COMMERCIAL POLICY LIMITS"},
+        (46,47): {"qb_id": (225,263), "description": "COMMERCIAL POLICY LIMITS"},
+        (46,85): {"qb_id": (225,372), "description": "COMMERCIAL POLICY LIMITS"},
         (42,): {"qb_id": (278,), "description": ""},
         (42,84): {"qb_id": (278,364), "description": ""},
         (49,): {"qb_id": (229,), "description": "Auto"},
@@ -69,7 +69,7 @@ mapping_dict = {
     "PROPERTY DAMAGE LIMITS": {"qb_id": (261,), "description": ""},
     "POLICY PERIOD": {"qb_id": (260,), "description": ""},
     "UM/UIM LIMITS": {"qb_id": (262,), "description": ""},
-    "UMBRELLA POLICY LIMITS": {"qb_id": (263,), "description": ""},
+    "UMBRELLA POLICY LIMITS": {"qb_id": (263,), "description": "UMBRELLA ADD ON"},
         }
 
 custom_pricing_rules = {
@@ -292,7 +292,11 @@ def extract_info_with_organization(payload, realm_id, new_access_token):
     requester_match = re.search(r'"NewKey-Requester":"([^"]+)"', payload)
     if requester_match:
         requester_name = requester_match.group(1)
-
+    
+    # Extract umbrella
+    umbrella_match = re.search(r'"NewKey-Umbrella":"([^"]+)"', payload)
+    if umbrella_match:
+        umbrella = umbrella_match.group(1)
     
     # Search for "NewKey-Researcher" and extract the name
     researcher_match = re.search(r'"NewKey-Researcher":"([^"]+)"', payload)
@@ -320,11 +324,17 @@ def extract_info_with_organization(payload, realm_id, new_access_token):
         values = parse_json_and_extract_values(base_item_json[1])
         qb_id_info = get_qb_id(values)
         if qb_id_info and qb_id_info != 'None':
+            if 0 <= base_item_json[0] <= 3:
+                if (qb_id_info['qb_id'] == (225,263)) or (qb_id_info['qb_id'] ==  (223,263)):
+                    if umbrella == 'Unable to Verify':
+                        qb_ids_to_query.append({"qb_id": (273,), "description": "UNABLE TO VERIFY CREDIT"}) #add on discount
             # Check if it's the 4th, 5th, or 6th item since these are Upsells
             if 4 <= base_item_json[0] <= 6:
                 qb_id_info['description'] = "Additional Policy Found: " + qb_id_info['description']
                 if (qb_id_info['qb_id'] == (225,263)) or (qb_id_info['qb_id'] ==  (223,263)):
-                    qb_id_info['qb_id'] = (263,)
+                    qb_id_info['qb_id'] == (263,)
+                if qb_id_info['qb_id'] == (263,):
+                    qb_id_info['description'] = "UMBRELLA POLICY"
             qb_ids_to_query.append(qb_id_info)
 
     print('parsing dol')
@@ -350,7 +360,13 @@ def extract_info_with_organization(payload, realm_id, new_access_token):
                 text, dollar_value = service.rsplit(' - $', 1)
                 if text in mapping_dict:
                     qb_id = mapping_dict[text]
-                    qb_ids_to_query.append(qb_id)  # Collect QB ID for querying
+                    print(f'ttesetestsetse - {qb_id}')
+                    if umbrella == 'Unable to Verify' and qb_id == {'qb_id': (263,), 'description': 'UMBRELLA ADD ON'}:
+                        qb_ids_to_query.append(qb_id)
+                        qb_ids_to_query.append({"qb_id": (273,), "description": "UNABLE TO VERIFY CREDIT"}) #add on discoun
+                    else:
+                        qb_ids_to_query.append(qb_id)  # Collect QB ID for querying
+                    
 
     qb_id_list = tuple(set(
         str(qb_id)  # Convert each QB ID to string to ensure consistency
